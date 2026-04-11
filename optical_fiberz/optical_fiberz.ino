@@ -26,7 +26,7 @@ void onEvent(arduino_event_id_t event, arduino_event_info_t info);
 #define ETH_PHY_SPI_MISO 12   
 #define ETH_PHY_SPI_MOSI 11   
 
-#define DEBUG 0
+#define DEBUG 1
 #define HEARBEAT_TEST 0
 #define CAM_TEST 1
 #define FC_TEST 0
@@ -90,7 +90,8 @@ void onEvent(arduino_event_id_t event, arduino_event_info_t info);
 WiFiUDP udp;
 
 const int localPort = 14550; 
-IPAddress pcIP(192, 168, 1, 50);
+//IPAddress pcIP(192, 168, 1, 50);
+IPAddress pcIP(192, 168, 0, 104); 
 const int pcPort = 14550;
 
 static bool eth_connected = false;
@@ -401,9 +402,17 @@ void setup() {
     delay(100);
   }
   
+  /**
   ETH.config(
     IPAddress(192, 168, 1, 100),
     IPAddress(192, 168, 1, 50),
+    IPAddress(255, 255, 255, 0)
+  );
+  **/
+
+  ETH.config(
+    IPAddress(192, 168, 0, 200),      
+    IPAddress(192, 168, 0, 1),        
     IPAddress(255, 255, 255, 0)
   );
   
