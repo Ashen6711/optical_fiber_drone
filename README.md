@@ -9,3 +9,4 @@ Features:
 3. FC and ETh dev board comms (kinda messed up the FC i had, hence will be setting up a toy mavlink_message_receiver on a dev board)
 
 Examples/Demos: Coming soon ig!
+Till then check wiring yay: https://drive.google.com/file/d/1Hoop3sKOpznAGxQl1uySULUkNfj7XI21/view?usp=sharing
