@@ -12,6 +12,11 @@ PC_PORT = 14550
 FONT_PATH = r"C:\Users\Hi\OneDrive\Desktop\optical_fiber_drone\gcsz\uav_osd\UAV-OSD-Mono.ttf"
 FONT = ImageFont.truetype(FONT_PATH, size=10)
 
+HEADER_FMT  = '<HHHf'
+HEADER_SIZE = struct.calcsize(HEADER_FMT)
+
+frame_voltage = {}
+
 fragments = {}
 frame_stats = {}
 wait = 0
@@ -51,14 +56,19 @@ def draw_text(frame, text, pos, color, opacity):
     img_pil = Image.alpha_composite(img_pil, overlay)
     return cv2.cvtColor(np.array(img_pil.convert("RGB")), cv2.COLOR_RGB2BGR)
 
-def process_frame(frame_id, fragments_list):
+def process_frame(frame_id, fragments_list, voltage):
     try:
         data = b''.join([f[1] for f in sorted(fragments_list)])
 
         image = Image.open(io.BytesIO(data))
         frame = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
 
-        frame = draw_text(frame, f"FPS: {fps:.1f}", pos=(10, 5), color=(255, 255, 255), opacity = 180)
+        frame = draw_text(frame, f"{fps:.1f}FPS", pos=(10, 5), color=(255, 255, 255), opacity = 180)
+        volt_text = f"{voltage:.2f}V"
+        text_w = FONT.getlength(volt_text)
+        cx = int((frame.shape[1] - text_w) / 2)
+        frame = draw_text(frame, volt_text, pos=(cx, 5), color=(255, 255, 255), opacity=200)
+
         cv2.imshow("ESP32-CAM", frame)
         cv2.waitKey(1)
 
@@ -77,11 +87,11 @@ while True:
         if len(data) < 8:
             continue
 
-        header = struct.unpack('<HHHH', data[:8])
-        frame_id        = header[0]
-        fragment_id     = header[1]
-        total_fragments = header[2]
-        payload = data[8:]
+        frame_id, fragment_id, total_fragments, voltage = struct.unpack(HEADER_FMT, data[:HEADER_SIZE])
+        payload = data[HEADER_SIZE:]
+
+        if fragment_id == 0:
+            frame_voltage[frame_id] = voltage
 
         #print(f"Frame {frame_id}, frag {fragment_id}/{total_fragments}")
 
@@ -95,7 +105,8 @@ while True:
         received = len(fragments[frame_id])
         if received == (total_fragments):
             frame_data = [(i, fragments[frame_id][i]) for i in range(total_fragments)]
-            if(process_frame(frame_id, frame_data)):
+            voltage = frame_voltage.get(frame_id, 0.0) 
+            if(process_frame(frame_id, frame_data, voltage)):
                 now = time.time()
                 elapsed = 1/(now - fps_timer)
                 fps = 0.9 * fps + (1-0.9) * elapsed
@@ -103,6 +114,7 @@ while True:
 
             del fragments[frame_id]
             del frame_stats[frame_id]
+            frame_voltage.pop(frame_id, None)
         
         frames_ = True
         wait = 0

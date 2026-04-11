@@ -26,7 +26,7 @@ void onEvent(arduino_event_id_t event, arduino_event_info_t info);
 #define ETH_PHY_SPI_MISO 12   
 #define ETH_PHY_SPI_MOSI 11   
 
-#define DEBUG 1
+#define DEBUG 0
 #define HEARBEAT_TEST 0
 #define CAM_TEST 1
 #define FC_TEST 0
@@ -61,11 +61,12 @@ void onEvent(arduino_event_id_t event, arduino_event_info_t info);
 #endif
 
 #define MAX_UDP_SIZE 1200 //1472 
-#define FRAME_HEADER_SIZE 8
+//#define FRAME_HEADER_SIZE sizeof(frame_header)
 
 #if DEBUG
   #define DEBUG_PRINT(x) Serial.print(x)
   #define DEBUG_PRINTLN(x) Serial.println(x)
+  #define DEBUG_PRINTF(x, ...) Serial.printf(x, ##__VA_ARGS__)
 
   #define MAVLINK_HANDLE(msg) \
     do { \
@@ -82,6 +83,7 @@ void onEvent(arduino_event_id_t event, arduino_event_info_t info);
   #define DEBUG_PRINT(x)
   #define DEBUG_PRINTLN(x)
   #define MAVLINK_HANDLE(msg)
+  #define DEBUG_PRINTF(x, ...)
   //#define ON_EVENT(event, info)
 #endif
 
@@ -108,13 +110,15 @@ uint16_t frame_counter = 0;
 
 uint8_t bufz[MAVLINK_MAX_PACKET_LEN]; //more than MAVLINK_MAX_PACKET_LEN
 
-
 struct __attribute__((packed)) frame_header {
   uint16_t frame_id;      // frame no.
   uint16_t fragment_id;   // fragment no. in frame_id
   uint16_t total_fragments; // total frags
+  float voltage;
   //uint16_t data_len;      
 };
+
+#define FRAME_HEADER_SIZE sizeof(frame_header)
 
 /**
 @todo: Add more messages
@@ -125,7 +129,7 @@ void handle_mavlink_message(mavlink_message_t *msg) {
       DEBUG_PRINTLN("Heartbeat message received"); 
       break;
     default:
-      Serial.printf("Msg ID: %d\n", msg->msgid);
+      DEBUG_PRINTF("Msg ID: %d\n", msg->msgid);
   }
 }
 
@@ -277,7 +281,7 @@ bool init_cam() {
 
     esp_err_t err = esp_camera_init(&config);
     if (err != ESP_OK) {
-        Serial.printf("Cam init failed with error 0x%x", err);
+        DEBUG_PRINTF("Cam init failed with error 0x%x", err);
         return false;
     }
 
@@ -296,7 +300,7 @@ void send_fraged_frame(camera_fb_t *fb) {
   uint16_t frame_id = frame_counter++;
   uint16_t total_frag = (fb->len + MAX_UDP_SIZE - 1) / MAX_UDP_SIZE;
   
-  Serial.printf("Frame %lu: %u bytes, %u fragments\n", frame_id, fb->len, total_frag);
+  DEBUG_PRINTF("Frame %lu: %u bytes, %u fragments\n", frame_id, fb->len, total_frag);
   
   uint8_t buffer[MAX_UDP_SIZE + FRAME_HEADER_SIZE];
   uint16_t fragment_id = 0;
@@ -309,7 +313,12 @@ void send_fraged_frame(camera_fb_t *fb) {
     header->frame_id = frame_id;
     header->fragment_id = fragment_id;
     header->total_fragments = total_frag;
-    
+
+    if (fragment_id == 0) 
+      header->voltage = 6.7;
+    else 
+      header->voltage = 0;
+
     memcpy(buffer + FRAME_HEADER_SIZE, fb->buf + offset, frag_size);
     
     udp.beginPacket(pcIP, pcPort);
@@ -319,11 +328,10 @@ void send_fraged_frame(camera_fb_t *fb) {
     
     offset += frag_size;
     fragment_id++;
-    
     delayMicroseconds(200);
   }
   
-  Serial.printf("Sent %u fragments\n", fragment_id);
+  DEBUG_PRINTF("Sent %u fragments\n", fragment_id);
 }
 
 void send_heartbeat() {
