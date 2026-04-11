@@ -27,8 +27,8 @@ void onEvent(arduino_event_id_t event, arduino_event_info_t info);
 #define ETH_PHY_SPI_MOSI 11   
 
 #define DEBUG 1
-#define HEARBEAT_TEST 0
-#define CAM_TEST 1
+#define HEARBEAT_TEST 1
+#define CAM_TEST 0
 #define FC_TEST 0
 
 #if CAM_TEST
@@ -251,6 +251,7 @@ bool init_cam() {
 }
 **/
 
+#if CAM_TEST
 bool init_cam() {
     camera_config_t config;
     config.ledc_channel = LEDC_CHANNEL_0;
@@ -292,6 +293,7 @@ bool init_cam() {
 
     return true;
 }
+#endif
 
 /**todo: Learn about UDP fragmentation
 **/
@@ -383,10 +385,10 @@ void setup() {
     Serial.begin(115200);
   }
   
-  if(CAM_TEST){
+  #if CAM_TEST
   pinMode(CAM_ENABLE, OUTPUT);   
   digitalWrite(CAM_ENABLE, LOW);
-  }
+  #endif
 
   #if FC_TEST
     ORANGE_SERIAL.begin(ORANGE_BAUD, SERIAL_8N1, RX_ESP, TX_ESP);
@@ -418,13 +420,13 @@ void setup() {
   
   udp.begin(localPort);
 
-  if(CAM_TEST){
+  #if CAM_TEST
   cam_ok = init_cam();
   if (!cam_ok)
     DEBUG_PRINTLN("Cam failure");
   else
     DEBUG_PRINTLN("Cam success");
-  }
+  #endif
   //DEBUG_PRINTLN("MAVLink UDP ready on port 14550");
 
   //request_stream(DISTANCE_SENSOR, 1);
