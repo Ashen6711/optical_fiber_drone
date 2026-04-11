@@ -9,7 +9,7 @@ import random
 
 PC_PORT = 14550
 
-FONT_PATH = r"C:\Users\Hi\Downloads\uav_osd\UAV-OSD-Mono.ttf"
+FONT_PATH = r"C:\Users\Hi\OneDrive\Desktop\optical_fiber_drone\gcsz\uav_osd\UAV-OSD-Mono.ttf"
 FONT = ImageFont.truetype(FONT_PATH, size=10)
 
 fragments = {}
