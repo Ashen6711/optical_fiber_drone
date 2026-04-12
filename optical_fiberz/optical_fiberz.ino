@@ -10,6 +10,7 @@
 #include <ETH.h>
 #include <WiFiUdp.h>
 #include <c_library_v2-master/common/mavlink.h>
+#include <c_library_v2-master/max/mavlink_msg_cam_trigger.h>
 #include "esp_camera.h"
 
 void handle_mavlink_message(mavlink_message_t *msg);
@@ -26,9 +27,9 @@ void onEvent(arduino_event_id_t event, arduino_event_info_t info);
 #define ETH_PHY_SPI_MISO 12   
 #define ETH_PHY_SPI_MOSI 11   
 
-#define DEBUG 1
-#define HEARBEAT_TEST 1
-#define CAM_TEST 0
+#define DEBUG 0
+#define HEARBEAT_TEST 0
+#define CAM_TEST 1
 #define FC_TEST 0
 
 #if CAM_TEST
@@ -111,6 +112,8 @@ uint16_t frame_counter = 0;
 
 uint8_t bufz[MAVLINK_MAX_PACKET_LEN]; //more than MAVLINK_MAX_PACKET_LEN
 
+uint8_t cam_trigger = 1;
+
 struct __attribute__((packed)) frame_header {
   uint16_t frame_id;      // frame no.
   uint16_t fragment_id;   // fragment no. in frame_id
@@ -127,13 +130,20 @@ struct __attribute__((packed)) frame_header {
 void handle_mavlink_message(mavlink_message_t *msg) {
   switch (msg->msgid) {
     case MAVLINK_MSG_ID_HEARTBEAT:
-      DEBUG_PRINTLN("Heartbeat message received"); 
+      DEBUG_PRINTLN("Heartbeat message received");
       break;
+
+    case MAVLINK_MSG_ID_CAM_TRIGGER: {
+      DEBUG_PRINTLN("Camera trigger message received");
+      uint8_t action = mavlink_msg_cam_trigger_get_action(msg);
+      cam_trigger = (action == 1) ? 1 : 0;
+      break;
+    }
+
     default:
       DEBUG_PRINTF("Msg ID: %d\n", msg->msgid);
   }
 }
-
 /**
 *@todo Check the below fucns
 void request_stream(uint8_t stream_id, uint8_t rate_hz) {
@@ -327,11 +337,11 @@ void send_fraged_frame(camera_fb_t *fb) {
     udp.beginPacket(pcIP, pcPort);
     udp.write(buffer, FRAME_HEADER_SIZE + frag_size);
     udp.endPacket();
-    //delayMicroseconds(200);
+    delayMicroseconds(200);
     
     offset += frag_size;
     fragment_id++;
-    delayMicroseconds(200);
+    //delayMicroseconds(200);
   }
   
   DEBUG_PRINTF("Sent %u fragments\n", fragment_id);
@@ -441,7 +451,7 @@ void loop() {
 
   /**@todo: Add host GCS control
   **/
-  if(CAM_TEST){
+  if(CAM_TEST && cam_trigger){
   camera_fb_t *fb = esp_camera_fb_get();
   if (!fb) {
     DEBUG_PRINTLN("Capture failed");
@@ -451,7 +461,7 @@ void loop() {
 
   send_fraged_frame(fb);
   esp_camera_fb_return(fb);
-  delay(100); 
+  //delay(20); 
   }
 
   if(HEARBEAT_TEST){
