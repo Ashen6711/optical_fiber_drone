@@ -4,7 +4,7 @@ Hardware required:
 3. FC
 
 Features:
-1. FPV: QVGA streaming @ 9-10 fps (with OSD-like overlay)
+1. FPV: QVGA streaming @ 10-14fps (with OSD-like overlay)
 2. Joystick manual control over mavlink (want to explore parsing of rc channels override into crsf protocol)
 3. FC and ETh dev board comms (kinda messed up the FC i had, hence will be setting up a toy mavlink_message_receiver on a dev board)
 
