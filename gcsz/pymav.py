@@ -21,9 +21,9 @@ while True:
             master.target_system,
             master.target_component,
             mavutil.mavlink.MAV_CMD_REQUEST_MESSAGE,
-            0,  # Confirmation
-            33, # Message ID (GLOBAL_POSITION_INT)
-            0, 0, 0, 0, 0, 0  # Params
+            0,  
+            33,
+            0, 0, 0, 0, 0, 0
         )
         print("[TX] Command sent")
     

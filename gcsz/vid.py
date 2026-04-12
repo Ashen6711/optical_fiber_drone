@@ -6,6 +6,8 @@ import cv2
 import numpy as np
 import time
 import random
+from pymavlink import mavutil
+import time
 
 PC_PORT = 14550
 
@@ -27,6 +29,17 @@ jitter_frame = 0
 
 fps_timer = time.time()
 fps = 9.4
+
+'''
+master = mavutil.mavlink_connection('udpin:0.0.0.0:14550')
+
+master.mav.cam_trigger_send(
+    1,  
+    1, 
+    1                        
+)
+print("Camera triggered")
+'''
 
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 sock.bind(("0.0.0.0", PC_PORT))
