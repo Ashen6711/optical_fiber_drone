@@ -7,10 +7,126 @@
 #include <sys/ioctl.h>
 #include <stdlib.h>
 #include <errno.h>
+#include <arpa/inet.h>
+#include <sys/socket.h>
 #include <time.h>
 #include <dirent.h>
+#include <stdint.h>
+#include "optical_fiberz/c_library_v2-master/common/mavlink.h" 
 
 #define BTN_MAX 10
+
+//@todo: Adjust accordingly
+const uint8_t system_id = 1;
+const uint8_t component_id = 1;
+const uint8_t target_system_id = 1;
+
+
+int16_t mav_x = 0;
+int16_t mav_y = 0;
+int16_t mav_z = 0;
+int16_t mav_r = 0;
+uint16_t mav_buttons = 0;
+
+struct {
+    int16_t x;
+    int16_t y;
+    int16_t z;
+    int16_t r;
+    uint16_t buttons;   
+} mav_manual_control_mapping;
+
+struct mav_manual_control_mapping mav_manual_control_mappingz;
+
+int main(int argc, char* argv[])
+{
+    // Open UDP socket
+    const int socket_fd = socket(PF_INET, SOCK_DGRAM, 0);
+
+    if (socket_fd < 0) {
+        printf("socket error: %s\n", strerror(errno));
+        return -1;
+    }
+
+    // Bind to port
+    struct sockaddr_in addr = {};
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    inet_pton(AF_INET, "0.0.0.0", &(addr.sin_addr)); // listen on all network interfaces
+    addr.sin_port = htons(14550); // default port on the ground
+
+    if (bind(socket_fd, (struct sockaddr*)(&addr), sizeof(addr)) != 0) {
+        printf("bind error: %s\n", strerror(errno));
+        return -2;
+    }
+
+    // We set a timeout at 100ms to prevent being stuck in recvfrom for too
+    // long and missing our chance to send some stuff.
+    struct timeval tv;
+    tv.tv_sec = 0;
+    tv.tv_usec = 100000;
+    if (setsockopt(socket_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
+        printf("setsockopt error: %s\n", strerror(errno));
+        return -3;
+    }
+
+    struct sockaddr_in src_addr = {};
+    socklen_t src_addr_len = sizeof(src_addr);
+    bool src_addr_set = false;
+
+    /**
+    while (true) {
+        // For illustration purposes we don't bother with threads or async here
+        // and just interleave receiving and sending.
+        // This only works  if receive_some returns every now and then.
+        receive_some(socket_fd, &src_addr, &src_addr_len, &src_addr_set);
+
+        if (src_addr_set) {
+            send_some(socket_fd, &src_addr, src_addr_len);
+        }
+    }
+
+    return 0;
+    **/
+}
+
+void send_joy(int socket_fd, const struct sockaddr_in* src_addr, socklen_t src_addr_len)
+{
+    mavlink_message_t message;
+
+    mavlink_msg_manual_control_pack(
+    system_id,                 
+    component_id,            
+    &message,
+    target_system_id,       
+    mav_manual_control_mapping.x, 
+    mav_manual_control_mapping.y,   
+    mav_manual_control_mapping.z,   
+    mav_manual_control_mapping.r,
+    mav_manual_control_mapping.buttons, 
+    0,     
+    0,      
+    0, 0,  
+    0, 0, 0, 0, 0, 0
+);
+
+    uint8_t buffer[MAVLINK_MAX_PACKET_LEN];
+    const int len = mavlink_msg_to_send_buffer(buffer, &message);
+
+    int ret = sendto(socket_fd, buffer, len, 0, (const struct sockaddr*)src_addr, src_addr_len);
+    if (ret != len) {
+        printf("sendto error: %s\n", strerror(errno));
+    } else {
+        printf("Sent Joy\n");
+    }
+}
+
+int to_mav(int value, int code) {
+    if(code != ABS_Y)
+    return ((value - 1024) * 1000) / 1024;
+    else 
+    return (value * 1000) / 2048;
+}
 
 int mapz(int code, int value) {
     if (code == ABS_THROTTLE) {
@@ -125,11 +241,13 @@ int main(){
     }
     emit(out_fd, EV_SYN, SYN_REPORT, 0);
 
+    /**@todo: Convert to mavlink supported
+    **/
     struct input_event ev;
     while (read(in_fd, &ev, sizeof(ev)) > 0){
         if (ev.type == EV_ABS){
             if (ev.code == ABS_X || ev.code == ABS_RX || ev.code == ABS_Z) {
-                emit(out_fd, EV_ABS, ev.code, ev.value);
+                //emit(out_fd, EV_ABS, ev.code, ev.value);
             }       
             else if (ev.code == ABS_Y){
                 emit(out_fd, EV_ABS, ev.code, 2048-ev.value);
