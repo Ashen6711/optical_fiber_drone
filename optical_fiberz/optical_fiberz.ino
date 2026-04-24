@@ -30,11 +30,7 @@ void onEvent(arduino_event_id_t event, arduino_event_info_t info);
 #define START_OF_VID 0x67
 
 #define DEBUG 1
-#define HEARBEAT_TEST 0
-#define CAM_TEST 1
-#define FC_TEST 0
 
-#if CAM_TEST
 #define CAM_ENABLE     8
 #define PWDN_GPIO_NUM  -1
 #define RESET_GPIO_NUM -1
@@ -52,18 +48,16 @@ void onEvent(arduino_event_id_t event, arduino_event_info_t info);
 #define VSYNC_GPIO_NUM 1
 #define HREF_GPIO_NUM  2
 #define PCLK_GPIO_NUM  39
-#endif
 
 /**@todo: Bridge between FC and eth
 **/
-#if FC_TEST
 #define TX_ESP 1
 #define RX_ESP 2
-#define ORANGE_SERIAL Serial1
 #define ORANGE_BAUD 57600
-#endif
 
-#define MAX_UDP_SIZE 1300 //1472 
+#define ORANGE_SERIAL Serial1
+
+#define MAX_UDP_SIZE 1350 //1472 
 //#define FRAME_HEADER_SIZE sizeof(frame_header)
 
 #if DEBUG
@@ -90,7 +84,7 @@ void onEvent(arduino_event_id_t event, arduino_event_info_t info);
   //#define ON_EVENT(event, info)
 #endif
 
-#define PARSE_PAC_SEG 3 //Not final
+#define PARSE_PAC_SEG 4
 
 #define FRAME_HEADER_SIZE sizeof(frame_header)
 
@@ -107,10 +101,8 @@ static bool cam_ok = false;
 uint8_t system_id = 1;
 uint8_t component_id = 1;
 
-/**
 uint8_t target_sys_id = 1;
 uint8_t target_comp_id = 1;
-**/
 
 uint32_t heartbeat_timer = 0;
 
@@ -118,7 +110,7 @@ uint16_t frame_counter = 0;
 
 uint8_t bufz[MAVLINK_MAX_PACKET_LEN]; //more than MAVLINK_MAX_PACKET_LEN
 
-uint8_t cam_trigger = 1;
+uint8_t cam_trigger = 0;
 
 unsigned long parse_start_time;
 bool parse_time_running = false;
@@ -161,11 +153,19 @@ static const uint8_t crc8_table[256] = {
 };
 
 uint8_t send_not_ack = 0;
-uint8_t to_parse_data[256];
-uint8_t to_parse_data_[256];
+uint8_t to_parse_data[4];
+uint8_t to_parse_data_[4];
 int to_parse_data_len_ = 0;
 
 uint8_t not_ack_tries = 3;
+
+bool last_h_beat = false;
+bool last_dist = false;
+bool last_flow = false;
+
+bool enable_cam = false;
+bool enable_fc = false;
+bool enable_joy = false;
 
 struct __attribute__((packed)) frame_header {
   uint16_t frame_id;      // frame no.
@@ -175,6 +175,45 @@ struct __attribute__((packed)) frame_header {
   //uint16_t data_len;      
 };
 
+struct __attribute__((packed)) params {
+    uint8_t fc  : 1;
+    uint8_t cam : 1; 
+    uint8_t joy_control: 1;
+    uint8_t padding1 : 5;
+
+    uint8_t res_i : 4;
+    uint8_t padding2: 4;
+
+    uint8_t heartbeat: 1;
+    uint8_t distance_sensor: 1;
+    uint8_t optical_flow_rad: 1;
+    uint8_t padding3: 5;
+};
+
+params paramsz;
+
+const params default_p = {
+    .fc = 0,               
+    .cam = 1,              
+    .joy_control = 0,      
+    .padding1 = 0,
+
+    .res_i = 10,           
+    .padding2 = 0,
+
+    .heartbeat = 0,        
+    .distance_sensor = 0,  
+    .optical_flow_rad = 0,
+    .padding3 = 0
+};
+
+struct __attribute__((packed)) vid_reso {
+    uint8_t debug : 1;
+    uint8_t fc  : 1;
+    uint8_t cam : 1; 
+    uint8_t joy_control: 1;
+};
+
 enum Parse_State {
   WAITING,
   PARSING, 
@@ -182,27 +221,6 @@ enum Parse_State {
   DONE 
   };
 Parse_State parse_state = WAITING;
-
-/**
-@todo: Add more messages
-**/
-void handle_mavlink_message(mavlink_message_t *msg) {
-  switch (msg->msgid) {
-    case MAVLINK_MSG_ID_HEARTBEAT:
-      DEBUG_PRINTLN("Heartbeat message received");
-      break;
-
-    case MAVLINK_MSG_ID_CAM_TRIGGER: {
-      DEBUG_PRINTLN("Camera trigger message received");
-      uint8_t action = mavlink_msg_cam_trigger_get_action(msg);
-      cam_trigger = (action == 1) ? 1 : 0;
-      break;
-    }
-
-    default:
-      DEBUG_PRINTF("Msg ID: %d\n", msg->msgid);
-  }
-}
 
 //CRC shit
 uint8_t crc8_calculate(const uint8_t *data, size_t len) {
@@ -215,74 +233,55 @@ uint8_t crc8_calculate(const uint8_t *data, size_t len) {
     return crc;
 }
 
+void default_params_apply() {
+    paramsz = default_p;
+    enable_cam = paramsz.cam;
+    enable_fc = paramsz.fc;
+}
+
 void handle_to_parse_packet(uint8_t *packet_buffer, size_t packet_len) {
-    if (packet_len < PARSE_PAC_SEG) {
-        DEBUG_PRINTLN("Packet too short");
-        return;
-    }
-    
-    size_t payload_len = packet_len - 1;
+    size_t payload_len = packet_len - 1; 
     uint8_t received_crc = packet_buffer[payload_len];
-    
     uint8_t calc_crc = crc8_calculate(packet_buffer, payload_len);
     
-    if (calc_crc != received_crc) {
+    if (calc_crc == received_crc) {
+        paramsz = *(params*)packet_buffer; 
+        
+        enable_cam = paramsz.cam;
+        enable_fc = paramsz.fc;
+        
+        DEBUG_PRINTLN("Params updated");
+        parse_state = DONE;
+    } else {
         DEBUG_PRINTLN("CRC FAIL!");
         parse_state = RETRY;
-        return;
     }
-    else {
-      memcpy(to_parse_data_, packet_buffer, payload_len);
-      //params parsin start
-      parse_state = DONE;
-    }    
 }
 
-/**
-*@todo Check the below fucns
-void request_stream(uint8_t stream_id, uint8_t rate_hz) {
-  mavlink_message_t msg;
-  uint8_t buf[MAVLINK_MAX_PACKET_LEN];
 
-  mavlink_msg_command_long_pack(
-    1,
-    200,
-    &msg,
-    11,    
-    67,    
-    MAV_CMD_SET_MESSAGE_INTERVAL, 
-    0,    
-    (float)stream_id,     
-    (float)1000000.0f / rate_hz, 
-    0, 0, 0, 0, 0        
-  );
+//@todo Check the below fucns
+void request_mavlink_stream(uint32_t msg_id, int rate_hz) {
+    mavlink_message_t msg;
+    uint8_t buf[MAVLINK_MAX_PACKET_LEN];
 
-  uint16_t len = mavlink_msg_to_send_buffer(buf, &msg);
-  ORANGE_SERIAL.write(buf, len);
+    int32_t interval = (rate_hz <= 0) ? -1 : (1000000 / rate_hz);
+
+    mavlink_msg_command_long_pack(
+        system_id,    
+        component_id, 
+        &msg,
+        target_sys_id,            
+        target_comp_id,           
+        MAV_CMD_SET_MESSAGE_INTERVAL, 
+        0,            
+        (float)msg_id,   
+        (float)interval, 
+        0, 0, 0, 0, 0
+    );
+
+    uint16_t len = mavlink_msg_to_send_buffer(buf, &msg);
+    ORANGE_SERIAL.write(buf, len);
 }
-**/
-
-/**
-}
-void request_stream(uint8_t stream_id, uint8_t rate_hz) {
-  mavlink_message_t msg;
-  uint8_t buf[MAVLINK_MAX_PACKET_LEN];
-
-  mavlink_msg_request_data_stream_pack(
-    11, //@todo
-    67, //@todo
-    &msg,
-    1,          
-    1,          
-    stream_id,
-    rate_hz,
-    1           
-  );
-
-  uint16_t len = mavlink_msg_to_send_buffer(buf, &msg);
-  ORANGE_SERIAL.write(buf, len);
-}
-**/
 
 void onEvent(arduino_event_id_t event, arduino_event_info_t info) {
   switch (event) {
@@ -308,54 +307,6 @@ void onEvent(arduino_event_id_t event, arduino_event_info_t info) {
   }
 }
 
-/**
-bool init_cam() {
-  camera_config_t config;
-  config.ledc_channel = LEDC_CHANNEL_0;
-  config.ledc_timer = LEDC_TIMER_0;
-  config.pin_pwdn = PWDN_GPIO_NUM;
-  config.pin_reset = RESET_GPIO_NUM;
-  config.pin_xclk = XCLK_GPIO_NUM;
-  config.pin_sccb_sda = SIOD_GPIO_NUM;
-  config.pin_sccb_scl = SIOC_GPIO_NUM;
-  config.pin_d7 = Y9_GPIO_NUM;
-  config.pin_d6 = Y8_GPIO_NUM;
-  config.pin_d5 = Y7_GPIO_NUM;
-  config.pin_d4 = Y6_GPIO_NUM;
-  config.pin_d3 = Y5_GPIO_NUM;
-  config.pin_d2 = Y4_GPIO_NUM;
-  config.pin_d1 = Y3_GPIO_NUM;
-  config.pin_d0 = Y2_GPIO_NUM;
-  config.pin_vsync = VSYNC_GPIO_NUM;
-  config.pin_href = HREF_GPIO_NUM;
-  config.pin_pclk = PCLK_GPIO_NUM;
-  
-  config.xclk_freq_hz = 8000000;        
-  config.pixel_format = PIXFORMAT_JPEG;  
-  config.frame_size = FRAMESIZE_QVGA;     
-  config.jpeg_quality = 12;              
-  config.fb_count = 1;       
-  config.grab_mode = CAMERA_GRAB_LATEST;        
-  config.fb_location = CAMERA_FB_IN_PSRAM;    
-
-  esp_err_t err = esp_camera_init(&config);
-  if (err != ESP_OK) {
-    Serial.printf("Cam init failed: 0x%x\n", err);
-    return false;
-  }
-
-  sensor_t *s = esp_camera_sensor_get();
-  if (s->id.PID == OV3660_PID)
-    Serial.println("OV3660 detected!");
-  else
-    Serial.println(s->id.PID);
-  
-  Serial.println("Cam initialized");
-  return true;
-}
-**/
-
-#if CAM_TEST
 bool init_cam() {
     camera_config_t config;
     config.ledc_channel = LEDC_CHANNEL_0;
@@ -377,12 +328,19 @@ bool init_cam() {
     config.pin_pwdn = PWDN_GPIO_NUM;
     config.pin_reset = RESET_GPIO_NUM;
     config.xclk_freq_hz = 20000000;
-    config.frame_size = FRAMESIZE_VGA; 
+    config.frame_size = FRAMESIZE_VGA;
     config.pixel_format = PIXFORMAT_JPEG;
     config.grab_mode = CAMERA_GRAB_LATEST;
     config.fb_location = CAMERA_FB_IN_PSRAM;
     config.jpeg_quality = 20;
     config.fb_count = 2;
+
+    //settin frame size
+    /**
+    sensor_t *s = esp_camera_sensor_get();
+    if (s && s->status.framesize != paramsz.res_i)
+        s->set_framesize(s, (framesize_t)paramsz.res_i);
+      **/
 
     esp_err_t err = esp_camera_init(&config);
     if (err != ESP_OK) {
@@ -390,13 +348,12 @@ bool init_cam() {
         return false;
     }
 
-    DEBUG_PRINTLN("Cam Start");
     sensor_t *s = esp_camera_sensor_get();
     s->set_vflip(s, 1);
+    DEBUG_PRINTLN("Cam Start");
 
     return true;
 }
-#endif
 
 /**todo: Learn about UDP fragmentation
 **/
@@ -406,7 +363,7 @@ void send_fraged_frame(camera_fb_t *fb) {
   uint16_t frame_id = frame_counter++;
   uint16_t total_frag = (fb->len + MAX_UDP_SIZE - 1) / MAX_UDP_SIZE;
   
-  //DEBUG_PRINTF("Frame %lu: %u bytes, %u fragments\n", frame_id, fb->len, total_frag);
+  DEBUG_PRINTF("Frame %lu: %u bytes, %u fragments\n", frame_id, fb->len, total_frag);
   
   uint8_t buffer[MAX_UDP_SIZE + FRAME_HEADER_SIZE];
   uint16_t fragment_id = 0;
@@ -430,7 +387,7 @@ void send_fraged_frame(camera_fb_t *fb) {
     udp.beginPacket(pcIP, pcPort);
     udp.write(buffer, FRAME_HEADER_SIZE + frag_size);
     udp.endPacket();
-    //delayMicroseconds(200);
+    delayMicroseconds(100);
     
     offset += frag_size;
     fragment_id++;
@@ -438,30 +395,6 @@ void send_fraged_frame(camera_fb_t *fb) {
   }
   
   DEBUG_PRINTF("Sent %u fragments\n", fragment_id);
-}
-
-void send_heartbeat() {
-  mavlink_message_t msg;
-  uint8_t buf[MAVLINK_MAX_PACKET_LEN];
-
-  mavlink_msg_heartbeat_pack(
-    system_id, 
-    component_id, 
-    &msg,
-    MAV_TYPE_GENERIC,           
-    MAV_AUTOPILOT_GENERIC,      
-    MAV_MODE_FLAG_MANUAL_INPUT_ENABLED,
-    0,                         
-    MAV_STATE_ACTIVE);         
-  
-  uint16_t len = mavlink_msg_to_send_buffer(buf, &msg);
-  DEBUG_PRINTLN(len);
-  
-  udp.beginPacket(pcIP, pcPort);
-  udp.write(buf, len);
-  udp.endPacket();
-  
-  DEBUG_PRINTLN("Heartbeat is sent");
 }
 
 void check_for_mavlink() {
@@ -483,19 +416,51 @@ void check_for_mavlink() {
   }
 }
 
+void params_spam(){
+  if (paramsz.heartbeat && !last_h_beat) {
+    request_mavlink_stream(MAVLINK_MSG_ID_HEARTBEAT, 1); 
+    last_h_beat = true;
+  }
+
+  if (paramsz.distance_sensor && !last_dist) {
+    request_mavlink_stream(MAVLINK_MSG_ID_DISTANCE_SENSOR, 10);
+    last_dist = true;
+  }
+  if (paramsz.optical_flow_rad && !last_flow) {
+    request_mavlink_stream(MAVLINK_MSG_ID_OPTICAL_FLOW_RAD, 20);
+    last_flow = true;
+  }
+}
+
+void cam_sesh_control(){
+  int pack_siz = udp.parsePacket();
+  if (pack_siz > 0) {
+    if(pack_siz == 1){
+        uint8_t charzzz;
+        udp.read(&charzzz, 1);
+
+        if(charzzz == END_OF_VID){
+        cam_trigger = 0;
+        DEBUG_PRINTLN("Cam sesh ended");
+        }
+
+        if(charzzz == START_OF_VID){
+        cam_trigger = 1;
+        }
+    }
+    udp.flush();
+  }
+}
+
 void setup() {
   if(DEBUG){
     Serial.begin(115200);
   }
   
-  #if CAM_TEST
   pinMode(CAM_ENABLE, OUTPUT);   
   digitalWrite(CAM_ENABLE, LOW);
-  #endif
 
-  #if FC_TEST
-    ORANGE_SERIAL.begin(ORANGE_BAUD, SERIAL_8N1, RX_ESP, TX_ESP);
-  #endif
+  ORANGE_SERIAL.begin(ORANGE_BAUD, SERIAL_8N1, RX_ESP, TX_ESP);
 
   Network.onEvent(onEvent);
   
@@ -507,7 +472,6 @@ void setup() {
     delay(100);
   }
   
-
   ETH.config(
     IPAddress(192, 168, 1, 100),
     IPAddress(192, 168, 1, 50),
@@ -524,19 +488,13 @@ void setup() {
   
   udp.begin(localPort);
 
-  #if CAM_TEST
   cam_ok = init_cam();
   if (!cam_ok)
-    DEBUG_PRINTLN("Cam failure");
+    DEBUG_PRINTLN("Cam Failure");
   else
-    DEBUG_PRINTLN("Cam success");
-  #endif
-  //DEBUG_PRINTLN("MAVLink UDP ready on port 14550");
+    DEBUG_PRINTLN("Cam Success");
 
-  //request_stream(DISTANCE_SENSOR, 1);
-  //DEBUG_PRINTLN("Requested");
-
-  //parse_start_time = millis();
+  parse_start_time = millis();
   //parse_time_running = true;
 }
 
@@ -546,59 +504,63 @@ void loop() {
       return;
   }
 
-  int pack_siz = udp.parsePacket();
-  if (pack_siz > 0) {
-    if(pack_siz == 1){
-        uint8_t charzzz;
-        udp.read(&charzzz, 1);
+  cam_sesh_control();
 
-        if(charzzz == START_OF_VID){
-        cam_trigger = 1;
-        udp.flush();
-        }
-
-        if(charzzz == END_OF_VID){
-        cam_trigger = 0;
-        udp.flush();
-        }
+while (parse_state != DONE) {
+    if (millis() - parse_start_time >= 10000) {
+        default_params = true;
+        parse_state = DONE;
+        DEBUG_PRINTLN("Timeout, using default params");
+        break; 
     }
-  }
 
-  /**@todo In codin progress
-  while(parse_state != DONE){
     switch (parse_state) {
-      case WAITING:
-      if (udp.parsePacket() > 0) {
-        to_parse_data_len_ = udp.read(to_parse_data, sizeof(to_parse_data));
-        parse_state = PARSING;
+        case WAITING: {
+            int pack_siz = udp.parsePacket();
+            if (pack_siz == 4) {
+                uint8_t buffzzz[4];
+                udp.read(buffzzz, 4);
+                memcpy(to_parse_data, buffzzz, 4);
+                parse_state = PARSING;
+            }
+            break;
         }
 
-      if (millis() - parse_start_time >= 10000) {
-        DEBUG_PRINTLN("Parsing done");
-        parse_state = DONE;
-        default_params = true;
-      }
-        
-      break;
-            
-      case PARSING:
-      handle_to_parse_packet(to_parse_data, to_parse_data_len_);
-      break;
-            
-      case RETRY:
-      while(not_ack_tries >= 1){
-        --not_ack_tries;
-        parse_state = DONE;
-        default_params = true;
-      }
-      break;
-    }
-  }
-  **/
+        case PARSING:
+            handle_to_parse_packet(to_parse_data, 4);
+            break;
 
-  /**@todo: Add host GCS control
-  **/
-  if(CAM_TEST && cam_trigger){
+        case RETRY: {
+            if (not_ack_tries >= 1) {
+                --not_ack_tries;
+                
+                unsigned long retry_wait = millis();
+                while(millis() - retry_wait < 5000) {
+                    yield();
+                }
+                
+                parse_state = WAITING;
+            } else {
+                parse_state = DONE;
+                default_params = true;
+            }
+            break;
+        }
+
+        default:
+            break;
+    }
+
+    yield(); 
+}
+
+  if(default_params){
+    default_params_apply();
+    default_params = false;
+  }
+
+
+  if(enable_cam && cam_trigger){
   uint32_t start = micros();
 
   camera_fb_t *fb = esp_camera_fb_get();
@@ -609,7 +571,6 @@ void loop() {
     delay(200);
     return;
   }
-
 
   send_fraged_frame(fb);
   uint32_t sent = micros();  
@@ -623,17 +584,10 @@ void loop() {
   //delay(20); 
   }
 
-  if(HEARBEAT_TEST){
-  check_for_mavlink();
-  
-  if (millis() - heartbeat_timer > 1000) {
-    heartbeat_timer = millis();
-    send_heartbeat();
-  }
-  }
-
   //Debug
-  #if FC_TEST
+  if(enable_fc){
+  params_spam();
+
   mavlink_message_t msg;
   mavlink_status_t status;
 
@@ -648,5 +602,5 @@ void loop() {
       DEBUG_PRINTLN("Forwarded");
     }
   }
-  #endif
+  }
 }

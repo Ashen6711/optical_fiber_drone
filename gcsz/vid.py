@@ -58,19 +58,28 @@ sock.settimeout(1.0)
 
 print(f"Listening for video on port {PC_PORT}")
 
+def calculate_crc8(data):
+    crc = 0x00
+    for byte in data:
+        crc ^= byte
+        for _ in range(8):
+            if crc & 0x80:
+                crc = ((crc << 1) ^ 0x07) & 0xFF
+            else:
+                crc = (crc << 1) & 0xFF
+    return crc
+
 def generate_payload(config_file):
     config = configparser.ConfigParser()
     config.read(config_file)
 
     byte1 = 0
-    if config.getboolean('sym_params', 'enable_debug'):
-        byte1 |= (1 << 0)
     if config.getboolean('sym_params', 'enable_fc'):          
-        byte1 |= (1 << 1)
+        byte1 |= (1 << 0)
     if config.getboolean('sym_params', 'enable_cam'):         
-        byte1 |= (1 << 2)
+        byte1 |= (1 << 1)
     if config.getboolean('sym_params', 'enable_joy_control'): 
-        byte1 |= (1 << 3)
+        byte1 |= (1 << 2)
 
     byte2 = config.getint('vid_reso', 'reso_i') & 0xFF
 
@@ -82,7 +91,9 @@ def generate_payload(config_file):
     if config.getboolean('mavlink_tele', 'msg_optical_flow_rad'):        
         byte3 |= (1 << 2)
 
-    return bytes([byte1, byte2, byte3])
+    payload = bytearray([byte1, byte2, byte3])
+    payload.append(calculate_crc8(payload))
+    return payload
 
 
 def draw_text(frame, text, pos, color, opacity):
@@ -134,6 +145,7 @@ while True:
     if INI_FILE.lower().endswith('.ini') and os.path.exists(INI_FILE) and to_parse:
         binary_data = generate_payload(INI_FILE)
         print(f"Payload: {binary_data.hex().upper()}")
+        sock.sendto(binary_data, (BOARD_IP, PC_PORT))
         to_parse = False
 
     if(refresh):
@@ -141,8 +153,11 @@ while True:
         refresh = False
     
     try:
-        data, addr = sock.recvfrom(1350)
+        data, addr = sock.recvfrom(1600)
         #print(f"Packet from {addr}, size: {len(data)}") 
+
+        if not data:
+            continue
 
         if len(data) < 8:
             continue
