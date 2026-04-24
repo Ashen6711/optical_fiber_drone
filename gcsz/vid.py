@@ -8,14 +8,25 @@ import time
 import random
 from pymavlink import mavutil
 import time
+import configparser
+import os
 
 PC_PORT = 14550
+BOARD_PORT = 14550
+BOARD_IP = "192.168.1.100"
 
 FONT_PATH = r"/home/ashen/optical_fiber_drone/gcsz/uav_osd/UAV-OSD-Mono.ttf"
 FONT = ImageFont.truetype(FONT_PATH, size=10)
 
 HEADER_FMT  = '<HHHf'
 HEADER_SIZE = struct.calcsize(HEADER_FMT)
+
+END_OF_VID = b'\x04'
+START_OF_VID = b'\x67'
+refresh = True
+
+INI_FILE = r'/home/ashen/optical_fiber_drone/gcsz/params.ini'
+to_parse = True
 
 frame_voltage = {}
 
@@ -28,7 +39,7 @@ frames_ = True
 jitter_frame = 0
 
 fps_timer = time.time()
-fps = 9.4
+fps = 0
 
 '''
 master = mavutil.mavlink_connection('udpin:0.0.0.0:14550')
@@ -47,6 +58,33 @@ sock.settimeout(1.0)
 
 print(f"Listening for video on port {PC_PORT}")
 
+def generate_payload(config_file):
+    config = configparser.ConfigParser()
+    config.read(config_file)
+
+    byte1 = 0
+    if config.getboolean('sym_params', 'enable_debug'):
+        byte1 |= (1 << 0)
+    if config.getboolean('sym_params', 'enable_fc'):          
+        byte1 |= (1 << 1)
+    if config.getboolean('sym_params', 'enable_cam'):         
+        byte1 |= (1 << 2)
+    if config.getboolean('sym_params', 'enable_joy_control'): 
+        byte1 |= (1 << 3)
+
+    byte2 = config.getint('vid_reso', 'reso_i') & 0xFF
+
+    byte3 = 0
+    if config.getboolean('mavlink_tele', 'msg_heartbeat'):  
+        byte3 |= (1 << 0)
+    if config.getboolean('mavlink_tele', 'msg_distance_sensor'): 
+        byte3 |= (1 << 1)
+    if config.getboolean('mavlink_tele', 'msg_optical_flow_rad'):        
+        byte3 |= (1 << 2)
+
+    return bytes([byte1, byte2, byte3])
+
+
 def draw_text(frame, text, pos, color, opacity):
     global jitter_frame
     jitter_frame += 1
@@ -58,13 +96,13 @@ def draw_text(frame, text, pos, color, opacity):
     x, y = pos
     r, g, b = color
 
-    jx = random.randint(-2, 2) if jitter_frame % 10 == 0 else 0
-    jy = random.randint(-1, 1) if jitter_frame % 7 == 0 else 0
+    jx = random.randint(-1, 1) if jitter_frame % 10 == 0 else 0
+    #jy = random.randint(-1, 1) if jitter_frame % 7 == 0 else 0
 
-    draw.text((x + jx - 2, y + jy), text, font=FONT, fill=(r, 0, 0, opacity))   
-    draw.text((x + jx, y + jy), text, font=FONT, fill=(0, g, 0, opacity))   
-    draw.text((x + jx + 2, y + jy), text, font=FONT, fill=(0, 0, b, opacity))   
-    draw.text((x + jx, y + jy), text, font=FONT, fill=(r,g,b, opacity))
+    #draw.text((x + jx - 2, y + jy), text, font=FONT, fill=(r, 0, 0, opacity))   
+    #draw.text((x + jx, y + jy), text, font=FONT, fill=(0, g, 0, opacity))   
+    #draw.text((x + jx + 2, y + jy), text, font=FONT, fill=(0, 0, b, opacity))   
+    draw.text((x + jx, y), text, font=FONT, fill=(r,g,b, opacity))
 
     img_pil = Image.alpha_composite(img_pil, overlay)
     return cv2.cvtColor(np.array(img_pil.convert("RGB")), cv2.COLOR_RGB2BGR)
@@ -82,7 +120,7 @@ def process_frame(frame_id, fragments_list, voltage):
         cx = int((frame.shape[1] - text_w) / 2)
         frame = draw_text(frame, volt_text, pos=(cx, 5), color=(255, 255, 255), opacity=200)
 
-        cv2.imshow("ESP32-CAM", frame)
+        cv2.imshow("FPV", frame)
         cv2.waitKey(1)
 
         print(f"Frame {frame_id}: {len(data)} bytes, {image.size}")
@@ -93,8 +131,17 @@ def process_frame(frame_id, fragments_list, voltage):
         return False
 
 while True:
+    if INI_FILE.lower().endswith('.ini') and os.path.exists(INI_FILE) and to_parse:
+        binary_data = generate_payload(INI_FILE)
+        print(f"Payload: {binary_data.hex().upper()}")
+        to_parse = False
+
+    if(refresh):
+        sock.sendto(START_OF_VID, (BOARD_IP, PC_PORT))
+        refresh = False
+    
     try:
-        data, addr = sock.recvfrom(1600)
+        data, addr = sock.recvfrom(1350)
         #print(f"Packet from {addr}, size: {len(data)}") 
 
         if len(data) < 8:
@@ -147,6 +194,7 @@ while True:
         print(wait)
         continue
     except KeyboardInterrupt:
+        sock.sendto(END_OF_VID, (BOARD_IP, PC_PORT))
         break
 
 cv2.destroyAllWindows()
