@@ -116,6 +116,7 @@ unsigned long parse_start_time;
 bool parse_time_running = false;
 
 bool default_params = false;
+bool cam_update = true;
 
 static const uint8_t crc8_table[256] = {
     0x00, 0x07, 0x0E, 0x09, 0x1C, 0x1B, 0x12, 0x15,
@@ -198,7 +199,7 @@ const params default_p = {
     .joy_control = 0,      
     .padding1 = 0,
 
-    .res_i = 10,           
+    .res_i = 0, //By default its VGA when cam_init           
     .padding2 = 0,
 
     .heartbeat = 0,        
@@ -249,7 +250,11 @@ void handle_to_parse_packet(uint8_t *packet_buffer, size_t packet_len) {
         
         enable_cam = paramsz.cam;
         enable_fc = paramsz.fc;
-        
+
+      sensor_t *s = esp_camera_sensor_get();
+      if (s)
+      s->set_framesize(s, (framesize_t)paramsz.res_i);
+          
         DEBUG_PRINTLN("Params updated");
         parse_state = DONE;
     } else {
@@ -335,19 +340,12 @@ bool init_cam() {
     config.jpeg_quality = 20;
     config.fb_count = 2;
 
-    //settin frame size
-    /**
-    sensor_t *s = esp_camera_sensor_get();
-    if (s && s->status.framesize != paramsz.res_i)
-        s->set_framesize(s, (framesize_t)paramsz.res_i);
-      **/
-
     esp_err_t err = esp_camera_init(&config);
     if (err != ESP_OK) {
         DEBUG_PRINTF("Cam init failed with error 0x%x", err);
         return false;
     }
-
+    
     sensor_t *s = esp_camera_sensor_get();
     s->set_vflip(s, 1);
     DEBUG_PRINTLN("Cam Start");
@@ -468,7 +466,7 @@ void setup() {
             ETH_PHY_SPI_HOST, ETH_PHY_SPI_SCK, ETH_PHY_SPI_MISO, ETH_PHY_SPI_MOSI);
   
   while (!ETH.linkUp()) {
-    Serial.print(".");
+    DEUBUG_PRINT(".");
     delay(100);
   }
   
@@ -558,7 +556,6 @@ while (parse_state != DONE) {
     default_params_apply();
     default_params = false;
   }
-
 
   if(enable_cam && cam_trigger){
   uint32_t start = micros();
