@@ -11,7 +11,7 @@ Features:
 3. FC and ETh dev board telemetry comms
 
 @todo
-1. For now the code is non blocking, will be integrating FreeRTOS on esp32-s3 and asyncio for concurrency on GCS side
+1. For now the code is blocking, will be integrating FreeRTOS on esp32-s3 and asyncio for concurrency on GCS side
 2. Custom osd map overlay
 3. For now using simple .ini files, will make it cleaner ig
 
