@@ -12,3 +12,5 @@ Examples/Demos: Coming soon ig!
 Till then check wiring yay: https://drive.google.com/file/d/1Hoop3sKOpznAGxQl1uySULUkNfj7XI21/view?usp=sharing
 
 Note: If I haven't pushed for a while, I am working on custom FC
+
+The readme will be updated soon, cuz this one sucks and outdated
