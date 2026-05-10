@@ -15,11 +15,11 @@ Features:
 2. Custom osd map overlay 
 3. For now using simple .ini files, will make it cleaner ig
 
-So, I came across this vid: https://www.youtube.com/watch?v=1QRrsfQfzxw and https://gitea.osmocom.org/electronics/osmo-small-hardware/src/branch/master/sfp-breakout/gerber/sfp-breakout
+So, I came across this [vid](https://www.youtube.com/watch?v=1QRrsfQfzxw) and [this](https://gitea.osmocom.org/electronics/osmo-small-hardware/src/branch/master/sfp-breakout/gerber/sfp-breakout)
 
 Might be implementing this if I manage to do it on a zero-pcb.
 
 Examples/Demos: Coming soon ig!
-Till then check wiring yay: https://drive.google.com/file/d/1Hoop3sKOpznAGxQl1uySULUkNfj7XI21/view?usp=sharing
+Till then check [wiring](https://drive.google.com/file/d/1Hoop3sKOpznAGxQl1uySULUkNfj7XI21/view?usp=sharing) yay (will be takin pics of new setup soon)
 
 Note: If I haven't pushed for a while, I am working on custom FC
